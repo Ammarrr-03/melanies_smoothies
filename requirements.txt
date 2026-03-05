@@ -1,0 +1,6 @@
+requests
+streamlit
+snowflake-snowpark-python
+snowflake-connector-python>=3.7.0
+pandas>=2.2.0
+pyarrow>=15.0.0
