@@ -1,22 +1,22 @@
+# Streamlit in Snowflake (SiS) version — keep using get_active_session()
 import streamlit as st
+from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark.functions import col
+from uuid import uuid4
+from datetime import datetime, timezone
 
 st.title("Customise Your Smoothie🥤")
 st.write("Choose the fruits you want in your custom smoothie")
 
 name_on_order = st.text_input("Name on smoothie:")
-if name_on_order:
-    st.write("The name on your smoothie will be:", name_on_order)
 
-# Use the Streamlit connection (outside Snowflake) OR get_active_session() (inside Snowflake)
-cnx = st.connection("snowflake")          # if running locally/Streamlit Cloud
-session = cnx.session()
+# cnx = st.connection("snowflake")   # requires [connections.snowflake] in secrets.toml
+# session = cnx.session()
 
-# If you're running inside Snowflake's Streamlit, use:
-# from snowflake.snowpark.context import get_active_session
-# session = get_active_session()
 
-# --- Load options ---
+session = get_active_session()
+
+# Get options (convert to pandas for Streamlit UI)
 sp_df = session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS").select(col("FRUIT_NAME"))
 pd_df = sp_df.to_pandas()
 st.dataframe(pd_df, use_container_width=True)
@@ -33,20 +33,22 @@ if ingredients_list:
     ingredients_string = ", ".join(ingredients_list)
     st.write("Your selection:", ingredients_string)
 
-    # Button disabled until a name is present (avoid NOT NULL violations)
     submit = st.button("Submit Order", disabled=(not name_on_order))
 
     if submit:
         try:
-            # Create a one-row Snowpark DF and append to the table
+            # Provide ALL columns explicitly
+            order_uid = str(uuid4())                         # assumes ORDER_UID is VARCHAR
+            order_filled = False                             # assumes BOOLEAN
+            order_ts = datetime.now(timezone.utc)            # TIMESTAMP_TZ/NTZ
+
             to_insert = session.create_dataframe(
-                [(ingredients_string, name_on_order)],
-                schema=["INGREDIENTS", "NAME_ON_ORDER"]
+                [(order_uid, order_filled, name_on_order, ingredients_string, order_ts)],
+                schema=["ORDER_UID", "ORDER_FILLED", "NAME_ON_ORDER", "INGREDIENTS", "ORDER_TS"],
             )
             to_insert.write.mode("append").save_as_table("SMOOTHIES.PUBLIC.ORDERS")
             st.success("Your Smoothie is ordered!", icon="✅")
         except Exception as e:
-            # Show query id for deeper debugging in Snowflake UI
             qid = None
             try:
                 qid = session.get_last_query_id()
