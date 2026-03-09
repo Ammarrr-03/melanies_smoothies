@@ -48,7 +48,8 @@ if ingredients_list:
     try:
         api_url = "https://my.smoothiefroot.com/api/fruit/watermelon"
         smoothiefroot_response = requests.get(api_url)
-        st.json(smoothiefroot_response.json())
+        #st.json(smoothiefroot_response.json())
+        sf_df = st.dataframe(data=smoothiefroot_response.json(),use_container_width = True)
     except Exception as e:
         st.error(f"API request failed: {e}")
 
