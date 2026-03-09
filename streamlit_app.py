@@ -1,22 +1,35 @@
 import streamlit as st
-from snowflake.snowpark.functions import col, lit, current_timestamp
+from snowflake.snowpark.functions import col, current_timestamp
+from uuid import uuid4   # only used if you later want varchar IDs
+import requests
 
-st.title("Customise Your Smoothie🥤")
-st.write("Choose the fruits you want in your custom smoothie")
+# ------------------------------------------------------------
+# Streamlit App
+# ------------------------------------------------------------
+
+st.title("Customise Your Smoothie 🥤")
+st.write("Choose the fruits you want in your custom smoothie.")
 
 name_on_order = st.text_input("Name on smoothie:")
 
-# Create session via st.connection (outside Snowflake)
-cnx = st.connection("snowflake")
+# ------------------------------------------------------------
+# Create Snowflake session (outside Snowflake → cnx method)
+# ------------------------------------------------------------
+cnx = st.connection("snowflake")   # requires secrets.toml
 session = cnx.session()
 
+# ------------------------------------------------------------
 # Load fruit options
+# ------------------------------------------------------------
 sp_df = session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS").select(col("FRUIT_NAME"))
 pd_df = sp_df.to_pandas()
 st.dataframe(pd_df, use_container_width=True)
 
 fruit_options = pd_df["FRUIT_NAME"].dropna().astype(str).tolist()
 
+# ------------------------------------------------------------
+# User chooses up to 5 ingredients
+# ------------------------------------------------------------
 ingredients_list = st.multiselect(
     "Choose up to 5 ingredients:",
     fruit_options,
@@ -28,38 +41,70 @@ if ingredients_list:
     ingredients_string = ", ".join(ingredients_list)
     st.write("Your selection:", ingredients_string)
 
-    submit = st.button("Submit Order", disabled=(not name_on_order))
+    # ------------------------------------------------------------
+    # SmoothieFroot API call (correct and properly placed)
+    # ------------------------------------------------------------
+    st.subheader("Fruit API Response (Watermelon Example)")
+    try:
+        api_url = "https://my.smoothiefroot.com/api/fruit/watermelon"
+        smoothiefroot_response = requests.get(api_url)
+        st.json(smoothiefroot_response.json())
+    except Exception as e:
+        st.error(f"API request failed: {e}")
 
-    import requests  
-    smoothiefroot_response = requests.get("[https://my.smoothiefroot.com/api/fruit/watermelon](https://my.smoothiefroot.com/api/fruit/watermelon)")  
-    st.text(smoothiefroot_response)
+    # ------------------------------------------------------------
+    # Submit Order button
+    # ------------------------------------------------------------
+    submit = st.button("Submit Order", disabled=(not name_on_order))
 
     if submit:
         try:
-            from uuid import uuid4
+            # ------------------------------------------------------------
+            # 1. Generate ORDER_UID using Snowflake sequence
+            # ------------------------------------------------------------
+            order_uid = session.sql(
+                "SELECT SMOOTHIES.PUBLIC.ORDER_SEQ.NEXTVAL"
+            ).collect()[0][0]
 
-            order_uid = session.sql("SELECT SMOOTHIES.PUBLIC.ORDER_SEQ.NEXTVAL").collect()[0][0]     # assumes ORDER_UID is VARCHAR
-            order_filled = False          # BOOLEAN
+            order_filled = False  # BOOLEAN
 
-            # Build DF for first 4 columns
+            # ------------------------------------------------------------
+            # 2. Build Snowpark DataFrame (without ORDER_TS first)
+            # ------------------------------------------------------------
             base = session.create_dataframe(
                 [(order_uid, order_filled, name_on_order, ingredients_string)],
                 schema=["ORDER_UID", "ORDER_FILLED", "NAME_ON_ORDER", "INGREDIENTS"]
             )
 
-            # Add ORDER_TS as server-side LTZ
+            # ------------------------------------------------------------
+            # 3. Add ORDER_TS as server-side LTZ timestamp
+            # ------------------------------------------------------------
             df_with_ts = base.with_column(
                 "ORDER_TS",
                 current_timestamp().cast("timestamp_ltz")
             )
 
-            # Ensure column order matches the target table
+            # Ensure column order matches table
             df_with_ts = df_with_ts.select(
                 "ORDER_UID", "ORDER_FILLED", "NAME_ON_ORDER", "INGREDIENTS", "ORDER_TS"
             )
 
+            # ------------------------------------------------------------
+            # 4. Append into ORDERS table
+            # ------------------------------------------------------------
             df_with_ts.write.mode("append").save_as_table("SMOOTHIES.PUBLIC.ORDERS")
-            st.success("Your Smoothie is ordered!", icon="✅")
+
+            st.success("Your Smoothie is ordered! ✅")
+
+            # ------------------------------------------------------------
+            # 5. Show recent orders (optional)
+            # ------------------------------------------------------------
+            recent = session.table("SMOOTHIES.PUBLIC.ORDERS") \
+                            .sort(col("ORDER_TS").desc()) \
+                            .limit(5) \
+                            .to_pandas()
+            st.subheader("Recent Orders")
+            st.dataframe(recent, use_container_width=True)
 
         except Exception as e:
             qid = None
@@ -67,5 +112,6 @@ if ingredients_list:
                 qid = session.get_last_query_id()
             except Exception:
                 pass
+
             st.error(f"Insert failed. Query ID: {qid or 'n/a'}")
             st.exception(e)
