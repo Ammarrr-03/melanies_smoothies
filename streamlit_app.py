@@ -1,6 +1,4 @@
-# Streamlit in Snowflake (SiS) version — keep using get_active_session()
 import streamlit as st
-from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark.functions import col
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -10,13 +8,11 @@ st.write("Choose the fruits you want in your custom smoothie")
 
 name_on_order = st.text_input("Name on smoothie:")
 
-# cnx = st.connection("snowflake")   # requires [connections.snowflake] in secrets.toml
-# session = cnx.session()
+# ✅ Outside Snowflake (local / Streamlit Cloud): use st.connection
+cnx = st.connection("snowflake")   # requires [connections.snowflake] in .streamlit/secrets.toml
+session = cnx.session()
 
-
-session = get_active_session()
-
-# Get options (convert to pandas for Streamlit UI)
+# --- Load fruit options from Snowflake with Snowpark, convert to pandas for Streamlit UI ---
 sp_df = session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS").select(col("FRUIT_NAME"))
 pd_df = sp_df.to_pandas()
 st.dataframe(pd_df, use_container_width=True)
@@ -37,18 +33,21 @@ if ingredients_list:
 
     if submit:
         try:
-            # Provide ALL columns explicitly
-            order_uid = str(uuid4())                         # assumes ORDER_UID is VARCHAR
-            order_filled = False                             # assumes BOOLEAN
-            order_ts = datetime.now(timezone.utc)            # TIMESTAMP_TZ/NTZ
+            # ❗ ORDERS table columns: ORDER_UID, ORDER_FILLED, NAME_ON_ORDER, INGREDIENTS, ORDER_TS
+            # Provide all 5 values explicitly
+            order_uid = str(uuid4())                # assumes ORDER_UID is VARCHAR (if NUMBER via sequence, see SQL option below)
+            order_filled = False                    # assumes BOOLEAN
+            order_ts = datetime.now(timezone.utc)   # TIMESTAMP_TZ/NTZ is fine
 
             to_insert = session.create_dataframe(
                 [(order_uid, order_filled, name_on_order, ingredients_string, order_ts)],
                 schema=["ORDER_UID", "ORDER_FILLED", "NAME_ON_ORDER", "INGREDIENTS", "ORDER_TS"],
             )
             to_insert.write.mode("append").save_as_table("SMOOTHIES.PUBLIC.ORDERS")
+
             st.success("Your Smoothie is ordered!", icon="✅")
         except Exception as e:
+            # Help yourself debug in Snowflake → History
             qid = None
             try:
                 qid = session.get_last_query_id()
