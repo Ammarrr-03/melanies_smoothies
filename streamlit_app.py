@@ -34,7 +34,7 @@ if ingredients_list:
         try:
             from uuid import uuid4
 
-            order_uid = session.sql("SELECT * FROM ORDER_SEQ.NEXTVAL").collect()[0][0]     # assumes ORDER_UID is VARCHAR
+            order_uid = session.sql("SELECT SMOOTHIES.PUBLIC.ORDER_SEQ.NEXTVAL").collect()[0][0]     # assumes ORDER_UID is VARCHAR
             order_filled = False          # BOOLEAN
 
             # Build DF for first 4 columns
