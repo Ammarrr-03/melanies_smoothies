@@ -65,4 +65,3 @@ if ingredients_list:
                 pass
             st.error(f"Insert failed. Query ID: {qid or 'n/a'}")
             st.exception(e)
-``
