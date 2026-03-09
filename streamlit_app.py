@@ -1,4 +1,3 @@
-# Import python packages
 import streamlit as st
 from snowflake.snowpark.functions import col
 
@@ -9,16 +8,19 @@ name_on_order = st.text_input("Name on smoothie:")
 if name_on_order:
     st.write("The name on your smoothie will be:", name_on_order)
 
-# Use Streamlit connection (requires secrets configured under [connections.snowflake])
-cnx = st.connection("snowflake")
+# Use the Streamlit connection (outside Snowflake) OR get_active_session() (inside Snowflake)
+cnx = st.connection("snowflake")          # if running locally/Streamlit Cloud
 session = cnx.session()
 
-# Load fruit options from Snowflake using Snowpark, then convert to pandas for display & widgets
-sp_df = session.table("smoothies.public.fruit_options").select(col("FRUIT_NAME"))
-pd_df = sp_df.to_pandas()  # Convert for Streamlit UI
+# If you're running inside Snowflake's Streamlit, use:
+# from snowflake.snowpark.context import get_active_session
+# session = get_active_session()
+
+# --- Load options ---
+sp_df = session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS").select(col("FRUIT_NAME"))
+pd_df = sp_df.to_pandas()
 st.dataframe(pd_df, use_container_width=True)
 
-# st.multiselect needs a list of strings
 fruit_options = pd_df["FRUIT_NAME"].dropna().astype(str).tolist()
 
 ingredients_list = st.multiselect(
@@ -28,24 +30,27 @@ ingredients_list = st.multiselect(
 )
 
 if ingredients_list:
-    # Nice, comma-separated string
     ingredients_string = ", ".join(ingredients_list)
-
     st.write("Your selection:", ingredients_string)
 
-    # Build INSERT. Prefer parameterization to avoid SQL injection
-    # Using Snowflake Snowpark SQL with bindings
-    my_insert_stmt = """
-        INSERT INTO smoothies.public.orders (ingredients, name_on_order)
-        SELECT :ingredients, :name
-    """
+    # Button disabled until a name is present (avoid NOT NULL violations)
+    submit = st.button("Submit Order", disabled=(not name_on_order))
 
-    # Enable order button only when a name is provided
-    time_to_insert = st.button("Submit Order", disabled=(not name_on_order))
-
-    if time_to_insert:
-        session.sql(my_insert_stmt, {
-            "ingredients": ingredients_string,
-            "name": name_on_order
-        }).collect()
-        st.success("Your Smoothie is ordered!", icon="✅")
+    if submit:
+        try:
+            # Create a one-row Snowpark DF and append to the table
+            to_insert = session.create_dataframe(
+                [(ingredients_string, name_on_order)],
+                schema=["INGREDIENTS", "NAME_ON_ORDER"]
+            )
+            to_insert.write.mode("append").save_as_table("SMOOTHIES.PUBLIC.ORDERS")
+            st.success("Your Smoothie is ordered!", icon="✅")
+        except Exception as e:
+            # Show query id for deeper debugging in Snowflake UI
+            qid = None
+            try:
+                qid = session.get_last_query_id()
+            except Exception:
+                pass
+            st.error(f"Insert failed. Query ID: {qid or 'n/a'}")
+            st.exception(e)
