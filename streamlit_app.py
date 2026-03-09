@@ -30,6 +30,10 @@ if ingredients_list:
 
     submit = st.button("Submit Order", disabled=(not name_on_order))
 
+    import requests  
+    smoothiefroot_response = requests.get("[https://my.smoothiefroot.com/api/fruit/watermelon](https://my.smoothiefroot.com/api/fruit/watermelon)")  
+    st.text(smoothiefroot_response)
+
     if submit:
         try:
             from uuid import uuid4
